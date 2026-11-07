@@ -1,0 +1,11 @@
+.git
+**/node_modules
+render-server/out
+render-server/logs
+demo
+docs
+samples
+tools
+db
+*.zip
+*.pdf
