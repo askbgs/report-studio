@@ -1,0 +1,47 @@
+# Builds the Docsmith render server image (the same Dockerfile Railway uses)
+# and offers it two ways:
+#   1. as a downloadable file  docsmith-render.tar.gz  (Actions run → Artifacts)
+#   2. in GitHub Container Registry  ghcr.io/<owner>/docsmith-render:latest
+# Run it from GitHub: Actions → "Build render server image" → Run workflow.
+name: Build render server image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'render-server/**'
+      - 'static/rpt-engine.js'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -f render-server/Dockerfile -t docsmith-render:latest .
+
+      - name: Save the image as a file
+        run: docker save docsmith-render:latest | gzip > docsmith-render.tar.gz
+
+      - name: Upload the file
+        uses: actions/upload-artifact@v4
+        with:
+          name: docsmith-render-image
+          path: docsmith-render.tar.gz
+          retention-days: 30
+          compression-level: 0
+
+      - name: Push to GitHub Container Registry
+        run: |
+          IMAGE=ghcr.io/$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')/docsmith-render
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag docsmith-render:latest "$IMAGE:latest"
+          docker tag docsmith-render:latest "$IMAGE:${GITHUB_SHA::7}"
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:${GITHUB_SHA::7}"
