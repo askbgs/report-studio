@@ -12,7 +12,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var PX_TO_PT = 0.75;
   var FONT_FALLBACK = "'Noto Sans','Noto Sans Tamil','Noto Sans Sinhala',Arial,sans-serif";
   var FONTS = ['Noto Sans', 'Noto Serif', 'Noto Sans Tamil', 'Noto Sans Sinhala', 'Noto Sans Mono',
@@ -286,6 +286,10 @@
     switch (n) {
       case 'NVL': return a[0] == null || a[0] === '' ? a[1] : a[0];
       case 'IIF': case 'IF': return truthy(a[0]) ? a[1] : (a.length > 2 ? a[2] : null);
+      case 'DECODE': {   // DECODE(expr, search1, result1 [, search2, result2 ...] [, default]) - as in Oracle SQL
+        for (var di = 1; di + 1 < a.length; di += 2) if (eq(a[0], a[di]) || (a[0] == null && a[di] == null)) return a[di + 1];
+        return a.length % 2 === 0 ? a[a.length - 1] : null;
+      }
       case 'UPPER': return str(a[0]).toUpperCase();
       case 'LOWER': return str(a[0]).toLowerCase();
       case 'INITCAP': return str(a[0]).toLowerCase().replace(/(^|[^\p{L}])(\p{L})/gu, function (m, p, c) { return p + c.toUpperCase(); });
@@ -527,6 +531,21 @@
     } catch (err) { ctx.errors.push('Print when "' + expr + '": ' + err.message); return true; }
   }
 
+  // A template that is exactly one token ({{EXPR|fmt}}) keeps its raw value for Excel
+  var SINGLE_TOKEN = /^\s*\{\{((?:(?!\}\})[\s\S])*)\}\}\s*$/;   // exactly one token, nothing around it
+  function rawOf(tpl, ctx) {
+    var m = SINGLE_TOKEN.exec(tpl == null ? '' : String(tpl));
+    if (!m) return null;
+    var sp = splitFmt(m[1]);
+    try { return { raw: evaluate(compile(sp.expr.trim()), ctx), fmt: sp.fmt }; } catch (e) { return null; }
+  }
+  function mergeStyle(st, defaults) {
+    var o = {}, k;
+    for (k in (defaults || {})) o[k] = defaults[k];
+    for (k in (st || {})) if (st[k] !== '' && st[k] != null) o[k] = st[k];
+    return o;
+  }
+
   /* ------------------------------------------------------------------ CSS */
   function textCss(st, defaults, opt) {
     var s = {};
@@ -699,6 +718,10 @@
       case 'text': {
         it.text = interpolate(e.text, ctx);
         it.css = textCss(s, defaults);
+        it.st = mergeStyle(s, defaults);
+        var rv = rawOf(e.text, ctx);
+        if (rv) { it.raw = rv.raw; it.fmt = rv.fmt; }
+        it.isStatic = String(e.text || '').indexOf('{{') < 0;
         if (e.canGrow) {
           var mh = measureHeight(measurableText(it.text), it.css, it.w);
           if (mh > it.h) it.h = mh;
@@ -756,12 +779,19 @@
     var rowH = num(t.rowHeight, 16), headH = num(t.headerHeight, 18);
     var blocks = [];
 
-    function cellCss(style, base, colIdx, first, extraBg) {
-      var st = {};
-      var k;
+    function cellStyle(style, base, extraBg) {
+      var st = {}, k;
       for (k in base) st[k] = base[k];
       for (k in style) if (style[k] !== '' && style[k] != null) st[k] = style[k];
       if (extraBg && !style.bg) st.bg = extraBg;
+      return st;
+    }
+    function cellBorders(colIdx, first) {
+      if (!(bw > 0 && grid !== 'none')) return null;
+      return { w: bw, c: bc, l: grid === 'all' && colIdx === 0, t: !!first, r: grid === 'all', b: true };
+    }
+    function cellCss(style, base, colIdx, first, extraBg) {
+      var st = cellStyle(style, base, extraBg);
       var css = textCss(st, defaults, { padding: 3 });
       if (bw > 0 && grid !== 'none') {
         var b = bw + 'pt solid ' + bc;
@@ -776,12 +806,15 @@
       }
       return css;
     }
-    function rowBlock(texts, styleFor, minH, grow, first, bg, kind) {
+    function rowBlock(texts, styleFor, minH, grow, first, bg, kind, raws) {
       var cells = texts.map(function (tx, i) {
         var c = cols[i];
         var base = { align: c.align || 'left' };
         var css = cellCss(styleFor(c), base, i, first, bg);
-        return { el: t, kind: 'cell', x: xs[i].x, y: 0, w: xs[i].w, h: minH, text: tx, css: css, valign: c.valign || 'middle' };
+        var cell = { el: t, kind: 'cell', x: xs[i].x, y: 0, w: xs[i].w, h: minH, text: tx, css: css, valign: c.valign || 'middle',
+          st: mergeStyle(cellStyle(styleFor(c), base, bg), defaults), borders: cellBorders(i, first), rowKind: kind };
+        if (raws && raws[i]) { cell.raw = raws[i].raw; cell.fmt = raws[i].fmt; }
+        return cell;
       });
       var h = minH;
       if (grow) cells.forEach(function (c) { if (c.text) h = Math.max(h, measureHeight(measurableText(c.text), c.css, c.w)); });
@@ -800,14 +833,15 @@
     rows.forEach(function (row, i) {
       var rc = child(ctx, { row: row, rowSource: srcName, rowNum: i + 1 });
       var b = rowBlock(cols.map(function (c) { return interpolate(c.value, rc); }),
-        function () { return rs; }, rowH, t.canGrow !== false, !header && i === 0, zebra && i % 2 ? zebra : null, 'tableRow');
+        function () { return rs; }, rowH, t.canGrow !== false, !header && i === 0, zebra && i % 2 ? zebra : null, 'tableRow',
+        cols.map(function (c) { return rawOf(c.value, rc); }));
       if (header && t.repeatHeader !== false) b.repeatHeader = header;
       blocks.push(b);
     });
     if (cols.some(function (c) { return c.total && c.total !== 'none'; })) {
       var tc = child(ctx, { scopeRows: rows });
-      var labelDone = false;
-      var texts = cols.map(function (c) {
+      var labelDone = false, totRaw = [];
+      var texts = cols.map(function (c, ci) {
         if (c.total && c.total !== 'none') {
           var m = /^\s*\{\{([\s\S]*?)\}\}\s*$/.exec(c.value || '');
           if (!m) return '';
@@ -816,6 +850,7 @@
           var f = c.total.toUpperCase();
           try {
             var v = evaluate({ k: 'fn', name: f, args: [compile(sp.expr.trim())] }, child(tc, { detailSource: srcName }));
+            totRaw[ci] = { raw: v, fmt: f === 'COUNT' ? null : fmt };
             return formatValue(v, f === 'COUNT' ? null : fmt);
           } catch (err) { ctx.errors.push('Total ' + c.header + ': ' + err.message); return '#ERR'; }
         }
@@ -823,7 +858,7 @@
         return '';
       });
       var fb = rowBlock(texts, function () { var o = { bold: true }; for (var k in fs) o[k] = fs[k]; return o; },
-        rowH, false, !header && !rows.length, fs.bg || null, 'tableTotal');
+        rowH, false, !header && !rows.length, fs.bg || null, 'tableTotal', totRaw);
       // the label spans every column before the first total column
       var firstTot = -1;
       cols.forEach(function (c, i) { if (firstTot < 0 && c.total && c.total !== 'none') firstTot = i; });
@@ -868,6 +903,7 @@
       if (!test(band.printWhen, c)) return;
       var bs = bandBlocks(band, c, d);
       if (!bs.length) return;
+      bs.forEach(function (bl) { bl.bandType = band.type; bl.group = band.group; });
       if (opts && opts.newPage) bs[0].pageBreakBefore = true;
       if (opts && opts.keep) bs[bs.length - 1].keepWithNext = true;
       Array.prototype.push.apply(blocks, bs);
@@ -1015,14 +1051,28 @@
     var pagesHtml = [];
     var pageStyle = 'width:' + P.width + 'pt;height:' + P.height + 'pt;';
     var maxPages = opts.maxPages || 2000;
+    var collect = !!opts.collect, outPages = [], outBody = [];
     docs.forEach(function (ctx) {
       if (pagesHtml.length >= maxPages) return;
       var blocks = buildBody(layout, ctx);
       var pages = paginate(blocks, layout);
       var total = pages.length;
+      if (collect) {
+        var pc0 = child(ctx, { page: 1, pages: total, scopeRows: ctx.detailSource ? rowsOf(ctx, ctx.detailSource) : [] });
+        var heads = [];
+        fixedBand(layout, 'pageHeader', 0).forEach(function (band) {
+          if (!test(band.printWhen, pc0)) return;
+          bandBlocks(band, pc0, layout.defaults).forEach(function (bl) { bl.bandType = 'pageHeader'; heads.push(bl); });
+        });
+        outBody.push({ blocks: heads.concat(blocks).map(serialBlock) });
+      }
       pages.forEach(function (pg, idx) {
         if (pagesHtml.length >= maxPages) return;
-        var pageNo = idx + 1, parts = [];
+        var pageNo = idx + 1, parts = [], items = [];
+        var put = function (it, ox, oy) {
+          parts.push(itemHtml(it, ox, oy, pageNo, total));
+          if (collect) items.push(serialItem(it, ox, oy, pageNo, total));
+        };
         var pc = child(ctx, { page: pageNo, pages: total, scopeRows: ctx.detailSource ? rowsOf(ctx, ctx.detailSource) : [] });
         // page header
         var hy = m.top;
@@ -1030,32 +1080,72 @@
           if (!test(band.printWhen, pc)) { hy += band.height; return; }
           var by = hy;
           bandBlocks(band, pc, layout.defaults).forEach(function (bl) {
-            bl.items.forEach(function (it) { parts.push(itemHtml(it, m.left, by, pageNo, total)); });
+            bl.items.forEach(function (it) { put(it, m.left, by); });
             by += bl.height;
           });
           hy += band.height;
         });
         pg.blocks.forEach(function (pb) {
-          pb.b.items.forEach(function (it) { parts.push(itemHtml(it, m.left, pb.y, pageNo, total)); });
+          pb.b.items.forEach(function (it) { put(it, m.left, pb.y); });
         });
         var fy = P.height - m.bottom - fixedHeight(layout, 'pageFooter', idx);
         fixedBand(layout, 'pageFooter', idx).forEach(function (band) {
           if (!test(band.printWhen, pc)) { fy += band.height; return; }
           var by = fy;
           bandBlocks(band, pc, layout.defaults).forEach(function (bl) {
-            bl.items.forEach(function (it) { parts.push(itemHtml(it, m.left, by, pageNo, total)); });
+            bl.items.forEach(function (it) { put(it, m.left, by); });
             by += bl.height;
           });
           fy += band.height;
         });
         pagesHtml.push('<div class="rpt-page" style="' + pageStyle + '">' + parts.join('') + '</div>');
+        if (collect) outPages.push({ items: items });
       });
     });
     var errs = [];
     base.errors.forEach(function (e) { if (errs.indexOf(e) < 0) errs.push(e); });
     docs.forEach(function (d) { d.errors.forEach(function (e) { if (errs.indexOf(e) < 0) errs.push(e); }); });
-    return { pages: pagesHtml, html: pagesHtml.join(''), css: baseCss(layout), pageCount: pagesHtml.length,
+    var res = { pages: pagesHtml, html: pagesHtml.join(''), css: baseCss(layout), pageCount: pagesHtml.length,
       errors: errs, width: P.width, height: P.height, contentWidth: cw };
+    if (collect) {
+      res.doc = { width: P.width, height: P.height, margin: m, title: layout.name || layout.code || '',
+        defaults: layout.defaults, pages: outPages, body: outBody };
+    }
+    return res;
+  }
+
+  /* ------------------------------------------- structured output (Word / Excel) */
+  function rawJson(v) {
+    if (v instanceof Date) return { d: v.getFullYear() + '-' + pad(v.getMonth() + 1, 2) + '-' + pad(v.getDate(), 2) + 'T' + pad(v.getHours(), 2) + ':' + pad(v.getMinutes(), 2) + ':' + pad(v.getSeconds(), 2) };
+    return v;
+  }
+  function serialItem(it, ox, oy, pageNo, pageCount) {
+    var e = it.el || {}, o = { kind: it.kind, x: r2(ox + it.x), y: r2(oy + it.y), w: r2(it.w), h: r2(it.h) };
+    if (it.text != null) o.text = String(it.text).split(PAGE_MARK).join(pageNo).split(PAGES_MARK).join(pageCount);
+    o.st = it.st || mergeStyle(e.style || {}, {});
+    if (it.borders) o.borders = it.borders;
+    if (it.valign) o.valign = it.valign; else if (o.st.valign) o.valign = o.st.valign;
+    if (it.kind === 'line') o.dir = e.dir || 'h';
+    if (it.kind === 'image') { o.src = it.src || ''; o.fit = e.fit || 'contain'; }
+    if (it.kind === 'barcode') { o.value = it.value; o.showText = e.showText !== false; o.svg = it.value ? code128Svg(it.value, (e.style || {}).color) : ''; }
+    if (it.rowKind) { o.rowKind = it.rowKind; o.tid = e.id; }
+    if (it.kind === 'ellipse' || (it.kind === 'line' && (e.dir === 'd1' || e.dir === 'd2' || ((e.style || {}).dash && (e.style || {}).dash !== 'solid'))) || (it.kind === 'rect' && num((e.style || {}).radius) > 0)) o.raster = true;
+    return o;
+  }
+  function serialBlock(b) {
+    return { band: b.bandType || '', group: b.group, kind: b.kind || 'band', table: b.tableId ? String(b.tableId).split(':').slice(0, 2).join(':') : null,
+      items: b.items.filter(function (it) { return it.kind === 'text' || it.kind === 'cell'; }).map(function (it) {
+        var o = { kind: it.kind, x: r2(it.x), y: r2(it.y || 0), w: r2(it.w), text: String(it.text == null ? '' : it.text).split(PAGE_MARK).join('').split(PAGES_MARK).join('') };
+        var tm = it.kind === 'text' && it.el ? SINGLE_TOKEN.exec(String(it.el.text || '')) : null;
+        if (tm) o.name = splitFmt(tm[1]).expr.trim();
+        if (it.raw !== undefined) { o.raw = rawJson(it.raw); o.fmt = it.fmt || null; }
+        if (it.isStatic) o.isStatic = true;
+        var st = it.st || {};
+        if (st.bold) o.bold = true;
+        if (st.align) o.align = st.align;
+        if (it.rowKind) o.rowKind = it.rowKind;
+        return o;
+      }) };
   }
 
   // Collect font families used, so callers can preload them before measuring

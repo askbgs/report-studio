@@ -19,7 +19,7 @@ WORKDIR /app/render-server
 COPY render-server/package.json ./
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
-COPY render-server/server.js ./
+COPY render-server/server.js render-server/office.js ./
 COPY static/rpt-engine.js /app/static/rpt-engine.js
 
 RUN chown -R node:node /app

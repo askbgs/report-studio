@@ -1,21 +1,26 @@
 {
   "name": "report-studio-render-server",
   "version": "1.0.0",
-  "description": "Renders Report Studio (Oracle APEX) layouts to PDF with headless Chromium. Unicode fonts (Tamil, Sinhala) bundled.",
+  "description": "Renders Docsmith (Oracle APEX) layouts to PDF, Word and Excel with headless Chromium. Unicode fonts (Tamil, Sinhala) bundled.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "node test.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@fontsource/noto-sans": "^5.1.0",
     "@fontsource/noto-sans-mono": "^5.1.0",
     "@fontsource/noto-sans-sinhala": "^5.1.0",
     "@fontsource/noto-sans-tamil": "^5.1.0",
     "@fontsource/noto-serif": "^5.1.0",
+    "docx": "^9.15.3",
+    "exceljs": "^4.4.0",
     "express": "^4.21.0",
-    "puppeteer": "^24.15.0"
+    "puppeteer": "^24.15.0",
+    "jszip": "^3.10.1"
   },
   "license": "MIT"
 }

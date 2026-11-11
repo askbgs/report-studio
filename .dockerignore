@@ -9,3 +9,4 @@ tools
 db
 *.zip
 *.pdf
+render-server/browser-profile
