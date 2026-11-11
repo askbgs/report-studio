@@ -103,7 +103,26 @@ const RASTERIZE = async (doc) => {
   for (const pg of doc.pages) {
     for (const it of pg.items) {
       try {
-        if (it.kind === 'image' && it.src) {
+        if (it.kind === 'watermark') {
+          // full-page transparent PNG: optional image + rotated text, drawn with the page's own fonts
+          const S = 2, c = document.createElement('canvas'); c.width = Math.round(it.w * S); c.height = Math.round(it.h * S);
+          const g = c.getContext('2d');
+          g.globalAlpha = it.opacity; g.translate(c.width / 2, c.height / 2); g.rotate(it.angle * Math.PI / 180);
+          const lines = it.text ? String(it.text).split('\n') : [], fs = it.fs * S, lh = fs * 1.1;
+          let imgH = 0, img = null;
+          if (it.src) { img = await load(it.src); if (img) imgH = (it.w * it.imgPct / 100) * S * (img.naturalHeight / Math.max(1, img.naturalWidth)); }
+          const gap = lines.length && img ? fs * 0.15 : 0, total = imgH + gap + lines.length * lh;
+          let y = -total / 2;
+          if (img) { const iw = (it.w * it.imgPct / 100) * S; g.drawImage(img, -iw / 2, y, iw, imgH); y += imgH + gap; }
+          if (lines.length) {
+            const font = (it.bold ? '700 ' : '400 ') + fs + 'px "' + it.fontFamily + '", "Noto Sans", "Noto Sans Tamil", "Noto Sans Sinhala", sans-serif';
+            try { await document.fonts.load(font, it.text); } catch (e) { /* use what is there */ }
+            g.font = font; g.fillStyle = it.color || '#c0392b'; g.textAlign = 'center'; g.textBaseline = 'middle';
+            if ('letterSpacing' in g) g.letterSpacing = (fs * 0.04) + 'px';
+            lines.forEach((l) => { g.fillText(l, 0, y + lh / 2); y += lh; });
+          }
+          it.png = c.toDataURL('image/png'); it.nw = 0; it.nh = 0; it.fit = 'stretch';
+        } else if (it.kind === 'image' && it.src) {
           const img = await load(it.src);
           if (!img) continue;
           it.nw = img.naturalWidth || it.w; it.nh = img.naturalHeight || it.h;

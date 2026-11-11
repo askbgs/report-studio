@@ -44,7 +44,7 @@ git push -u origin main
 3. Service → **Settings → Networking → Generate Domain**, e.g. `docsmith-render.up.railway.app`.
    **Settings → Region**: pick the one closest to your database (Southeast Asia / Singapore for Sri Lanka).
 4. Open `https://<domain>/health`. Expected:
-   `{"ok":true,"engine":"1.2.0","chromium":"ready",...,"formats":["pdf","docx","xlsx"]}`
+   `{"ok":true,"engine":"1.3.0","chromium":"ready",...,"formats":["pdf","docx","xlsx"]}`
 
 Memory: one render uses about 150–250 MB; give the service at least 1 GB.
 

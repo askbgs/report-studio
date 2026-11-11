@@ -182,7 +182,7 @@ function floatingImage(it) {
     floating: {
       horizontalPosition: { relative: docx.HorizontalPositionRelativeFrom.PAGE, offset: EMU(x) },
       verticalPosition: { relative: docx.VerticalPositionRelativeFrom.PAGE, offset: EMU(y) },
-      wrap: { type: docx.TextWrappingType.NONE }, allowOverlap: true, behindDocument: !!it.raster, lockAnchor: true
+      wrap: { type: docx.TextWrappingType.NONE }, allowOverlap: true, behindDocument: it.kind === 'watermark' ? !it.front : !!it.raster, lockAnchor: true
     }
   });
 }
@@ -372,7 +372,7 @@ async function buildXlsx(doc, data, opts) {
     widths[i] = w;
   };
 
-  ws.getCell(1, 1).value = opts.title || doc.title || 'Report';
+  ws.getCell(1, 1).value = (opts.title || doc.title || 'Report') + (doc.watermark ? '  [' + String(doc.watermark).replace(/\s+/g, ' ') + ']' : '');
   let dataRows = 0;
   ws.getCell(1, 1).font = { bold: true, size: 14 };
   rowNo = 3;

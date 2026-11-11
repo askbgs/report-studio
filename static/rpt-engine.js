@@ -12,7 +12,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
   var PX_TO_PT = 0.75;
   var FONT_FALLBACK = "'Noto Sans','Noto Sans Tamil','Noto Sans Sinhala',Arial,sans-serif";
   var FONTS = ['Noto Sans', 'Noto Serif', 'Noto Sans Tamil', 'Noto Sans Sinhala', 'Noto Sans Mono',
@@ -824,6 +824,46 @@
   }
   function qrItemSvg(it) { var e = it.el || {}; return it.value ? qrSvg(it.value, e.ecc, (e.style || {}).color, e.quiet) : ''; }
 
+
+  /* ------------------------------------------------------------ watermark
+     layout.watermark = { text, image, when, pages: all|first|last|notFirst, layer: front (default) | behind,
+                          color, opacity (0-1), angle ('auto' = page diagonal, or degrees), fontSize (blank = fit),
+                          bold, fontFamily, imageSize (% of page width) } */
+  function watermarkOn(wm) { return !!(wm && wm.enabled !== false && (String(wm.text || '').trim() || wm.image)); }
+  function watermarkItem(layout, ctx, pageNo, total) {
+    var wm = layout.watermark;
+    if (!watermarkOn(wm)) return null;
+    var pg = wm.pages || 'all';
+    if ((pg === 'first' && pageNo !== 1) || (pg === 'last' && pageNo !== total) || (pg === 'notFirst' && pageNo === 1)) return null;
+    if (!test(wm.when, ctx)) return null;
+    var W = layout.page.width, H = layout.page.height;
+    var text = String(interpolate(wm.text || '', ctx) || '').trim();
+    var src = '';
+    if (wm.image) { var code = interpolate(wm.image, ctx); src = (ctx.assets[code] || ctx.assets[String(code).toUpperCase()]) || (/^(data:|https?:|\/)/.test(code) ? code : ''); }
+    if (!text && !src) return null;
+    var ang = wm.angle === '' || wm.angle == null || wm.angle === 'auto' ? -Math.atan2(H, W) * 180 / Math.PI : num(wm.angle, 0);
+    var rad = Math.abs(ang * Math.PI / 180), c = Math.abs(Math.cos(rad)), sn = Math.abs(Math.sin(rad));
+    var span = Math.min(c > 1e-6 ? W / c : Infinity, sn > 1e-6 ? H / sn : Infinity);
+    var lines = text ? text.split(/\n/) : [], longest = 0;
+    lines.forEach(function (l) { if (l.length > longest) longest = l.length; });
+    var fs = num(wm.fontSize, 0);
+    if (!fs && longest) fs = Math.max(12, Math.min(span * 0.72 / (longest * 0.6), Math.min(W, H) * 0.28 / lines.length, 220));
+    var op = wm.opacity === '' || wm.opacity == null ? 0.15 : Math.max(0, Math.min(1, num(wm.opacity, 0.15)));
+    return { kind: 'watermark', x: 0, y: 0, w: W, h: H, el: { style: {} }, text: text, lines: lines, src: src,
+      fs: r2(fs), angle: r2(ang), opacity: op, color: wm.color || '#c0392b', bold: wm.bold !== false,
+      fontFamily: wm.fontFamily || (layout.defaults || {}).fontFamily || 'Noto Sans',
+      imgPct: num(wm.imageSize, 50), front: wm.layer !== 'behind' };
+  }
+  function watermarkHtml(it) {
+    var h = '<div class="rpt-wm" style="position:absolute;left:0;top:0;width:' + r2(it.w) + 'pt;height:' + r2(it.h) + 'pt;display:flex;align-items:center;justify-content:center;pointer-events:none;' +
+      'opacity:' + it.opacity + ';' + (it.front ? 'z-index:50;' : '') + '">';
+    h += '<div style="transform:rotate(' + it.angle + 'deg);display:flex;flex-direction:column;align-items:center;gap:' + r2(it.fs * 0.15) + 'pt">';
+    if (it.src) h += '<img src="' + esc(it.src) + '" alt="" style="width:' + r2(it.w * it.imgPct / 100) + 'pt;height:auto;display:block">';
+    if (it.text) h += '<div style="font-family:' + fontStack(it.fontFamily) + ';font-size:' + it.fs + 'pt;line-height:1.1;font-weight:' + (it.bold ? 700 : 400) +
+      ';color:' + esc(it.color) + ';white-space:pre;text-align:center;letter-spacing:.04em">' + esc(it.text) + '</div>';
+    return h + '</div></div>';
+  }
+
   /* -------------------------------------------------------- element HTML */
   function boxStyle(x, y, w, h) { return 'left:' + r2(x) + 'pt;top:' + r2(y) + 'pt;width:' + r2(w) + 'pt;height:' + r2(h) + 'pt;'; }
 
@@ -831,6 +871,7 @@
     var e = it.el, s = e.style || {};
     var pos = boxStyle(ox + it.x, oy + it.y, it.w, it.h);
     var fill = function (t) { return esc(String(t).split(PAGE_MARK).join(pageNo).split(PAGES_MARK).join(pageCount)); };
+    if (it.kind === 'watermark') return watermarkHtml(it);
     switch (it.kind) {
       case 'text':
         return '<div class="rpt-el" style="' + pos + it.css + valignCss(s.valign) + '"><div class="rpt-tx">' + fill(it.text) + '</div></div>';
@@ -1204,7 +1245,7 @@
     var pagesHtml = [];
     var pageStyle = 'width:' + P.width + 'pt;height:' + P.height + 'pt;';
     var maxPages = opts.maxPages || 2000;
-    var collect = !!opts.collect, outPages = [], outBody = [];
+    var collect = !!opts.collect, outPages = [], outBody = [], wmWord = '';
     docs.forEach(function (ctx) {
       if (pagesHtml.length >= maxPages) return;
       var blocks = buildBody(layout, ctx);
@@ -1227,6 +1268,9 @@
           if (collect) items.push(serialItem(it, ox, oy, pageNo, total));
         };
         var pc = child(ctx, { page: pageNo, pages: total, scopeRows: ctx.detailSource ? rowsOf(ctx, ctx.detailSource) : [] });
+        var wmi = watermarkItem(layout, pc, pageNo, total);
+        if (wmi && !wmi.front) put(wmi, 0, 0);
+        if (wmi && !wmWord) wmWord = wmi.text;
         // page header
         var hy = m.top;
         fixedBand(layout, 'pageHeader', idx).forEach(function (band) {
@@ -1251,6 +1295,7 @@
           });
           fy += band.height;
         });
+        if (wmi && wmi.front) put(wmi, 0, 0);
         pagesHtml.push('<div class="rpt-page" style="' + pageStyle + '">' + parts.join('') + '</div>');
         if (collect) outPages.push({ items: items });
       });
@@ -1262,7 +1307,7 @@
       errors: errs, width: P.width, height: P.height, contentWidth: cw };
     if (collect) {
       res.doc = { width: P.width, height: P.height, margin: m, title: layout.name || layout.code || '',
-        defaults: layout.defaults, pages: outPages, body: outBody };
+        defaults: layout.defaults, pages: outPages, body: outBody, watermark: wmWord };
     }
     return res;
   }
@@ -1273,6 +1318,8 @@
     return v;
   }
   function serialItem(it, ox, oy, pageNo, pageCount) {
+    if (it.kind === 'watermark') return { kind: 'watermark', x: 0, y: 0, w: r2(it.w), h: r2(it.h), text: it.text, src: it.src, fs: it.fs, angle: it.angle,
+      opacity: it.opacity, color: it.color, bold: it.bold, fontFamily: it.fontFamily, imgPct: it.imgPct, front: it.front, st: {}, raster: true };
     var e = it.el || {}, o = { kind: it.kind, x: r2(ox + it.x), y: r2(oy + it.y), w: r2(it.w), h: r2(it.h) };
     if (it.text != null) o.text = String(it.text).split(PAGE_MARK).join(pageNo).split(PAGES_MARK).join(pageCount);
     o.st = it.st || mergeStyle(e.style || {}, {});
@@ -1391,6 +1438,6 @@
     render: render, renderAsync: renderAsync, preloadFonts: preloadFonts, fontsUsed: fontsUsed, baseCss: baseCss,
     designHtml: designHtml, tableDesignHeight: tableDesignHeight, textCss: textCss,
     parse: parse, evaluate: evaluate, interpolate: interpolate, formatValue: formatValue, amountInWords: amountInWords,
-    code128Codes: code128Codes, code128Svg: code128Svg, C128: C128, qrMatrix: qrMatrix, qrSvg: qrSvg
+    code128Codes: code128Codes, code128Svg: code128Svg, C128: C128, qrMatrix: qrMatrix, qrSvg: qrSvg, watermarkItem: watermarkItem, watermarkHtml: watermarkHtml
   };
 });
