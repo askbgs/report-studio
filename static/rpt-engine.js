@@ -12,7 +12,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
   var PX_TO_PT = 0.75;
   var FONT_FALLBACK = "'Noto Sans','Noto Sans Tamil','Noto Sans Sinhala',Arial,sans-serif";
   var FONTS = ['Noto Sans', 'Noto Serif', 'Noto Sans Tamil', 'Noto Sans Sinhala', 'Noto Sans Mono',
@@ -671,6 +671,159 @@
     return '<svg viewBox="0 0 ' + x + ' 100" preserveAspectRatio="none" width="100%" height="100%" fill="' + (color || '#000') + '" shape-rendering="crispEdges">' + rects + '</svg>';
   }
 
+
+  /* ------------------------------------------------------------ QR code
+     ISO/IEC 18004 encoder, byte mode (UTF-8), versions 1-40, ECC L/M/Q/H,
+     automatic mask. No dependencies, same output in designer, browser and server. */
+  var QR_ECC = { L: [1, [-1, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18, 20, 24, 26, 30, 22, 24, 28, 30, 28, 28, 28, 28, 30, 30, 26, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+                      [-1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 6, 6, 6, 6, 7, 8, 8, 9, 9, 10, 12, 12, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 24, 25]],
+                 M: [0, [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28],
+                      [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49]],
+                 Q: [3, [-1, 13, 22, 18, 26, 18, 24, 18, 22, 20, 24, 28, 26, 24, 20, 30, 24, 28, 28, 26, 30, 28, 30, 30, 30, 30, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+                      [-1, 1, 1, 2, 2, 4, 4, 6, 6, 8, 8, 8, 10, 12, 16, 12, 17, 16, 18, 21, 20, 23, 23, 25, 27, 29, 34, 34, 35, 38, 40, 43, 45, 48, 51, 53, 56, 59, 62, 65, 68]],
+                 H: [2, [-1, 17, 28, 22, 16, 22, 28, 26, 26, 24, 28, 24, 28, 22, 24, 24, 30, 28, 28, 26, 28, 30, 24, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+                      [-1, 1, 1, 2, 4, 4, 4, 5, 6, 8, 8, 11, 11, 16, 16, 18, 16, 19, 21, 25, 25, 25, 34, 30, 32, 35, 37, 40, 42, 45, 48, 51, 54, 57, 60, 63, 66, 70, 74, 77, 81]] };
+  function qrUtf8(t) {
+    var out = [];
+    for (var i = 0; i < t.length; i++) {
+      var c = t.charCodeAt(i);
+      if (c >= 0xD800 && c < 0xDC00 && i + 1 < t.length) { var d = t.charCodeAt(i + 1); if (d >= 0xDC00 && d < 0xE000) { c = 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00); i++; } }
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xC0 | c >> 6, 0x80 | c & 63);
+      else if (c < 0x10000) out.push(0xE0 | c >> 12, 0x80 | c >> 6 & 63, 0x80 | c & 63);
+      else out.push(0xF0 | c >> 18, 0x80 | c >> 12 & 63, 0x80 | c >> 6 & 63, 0x80 | c & 63);
+    }
+    return out;
+  }
+  function qrMul(x, y) { var z = 0; for (var i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z & 255; }
+  function qrRawModules(v) { var r = (16 * v + 128) * v + 64; if (v >= 2) { var n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; } return r; }
+  function qrDataCodewords(v, ecl) { return Math.floor(qrRawModules(v) / 8) - QR_ECC[ecl][1][v] * QR_ECC[ecl][2][v]; }
+  function qrAlignPos(v) {
+    if (v === 1) return [];
+    var n = Math.floor(v / 7) + 2, step = Math.floor((v * 8 + n * 3 + 5) / (n * 4 - 4)) * 2, res = [6];
+    for (var pos = v * 4 + 10; res.length < n; pos -= step) res.splice(1, 0, pos);
+    return res;
+  }
+  /* returns { size, dark: [[bool]] } (row-major, dark[y][x]) or null when the text is too long */
+  function qrMatrix(text, ecl) {
+    ecl = QR_ECC[String(ecl || 'M').toUpperCase()] ? String(ecl || 'M').toUpperCase() : 'M';
+    var bytes = qrUtf8(String(text == null ? '' : text)), ver, cap = 0;
+    for (ver = 1; ver <= 40; ver++) {
+      cap = qrDataCodewords(ver, ecl) * 8;
+      if (4 + (ver < 10 ? 8 : 16) + bytes.length * 8 <= cap) break;
+    }
+    if (ver > 40) return null;
+    // bit stream
+    var bits = [], put = function (val, len) { for (var i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+    put(4, 4); put(bytes.length, ver < 10 ? 8 : 16);
+    bytes.forEach(function (b) { put(b, 8); });
+    put(0, Math.min(4, cap - bits.length));
+    put(0, (8 - bits.length % 8) % 8);
+    for (var pad = 0xEC; bits.length < cap; pad ^= 0xEC ^ 0x11) put(pad, 8);
+    var data = [];
+    for (var b = 0; b < bits.length; b += 8) { var byte = 0; for (var k = 0; k < 8; k++) byte = (byte << 1) | bits[b + k]; data.push(byte); }
+    // error correction + interleaving
+    var nBlocks = QR_ECC[ecl][2][ver], eccLen = QR_ECC[ecl][1][ver], raw = Math.floor(qrRawModules(ver) / 8);
+    var nShort = nBlocks - raw % nBlocks, shortLen = Math.floor(raw / nBlocks);
+    var div = []; for (var i = 0; i < eccLen - 1; i++) div.push(0); div.push(1);
+    for (var root = 1, r = 0; r < eccLen; r++) {
+      for (var j = 0; j < div.length; j++) { div[j] = qrMul(div[j], root); if (j + 1 < div.length) div[j] ^= div[j + 1]; }
+      root = qrMul(root, 2);
+    }
+    var blocks = [];
+    for (var bi = 0, pos = 0; bi < nBlocks; bi++) {
+      var dat = data.slice(pos, pos + shortLen - eccLen + (bi < nShort ? 0 : 1)); pos += dat.length;
+      var rem = div.map(function () { return 0; });
+      dat.forEach(function (x) { var f = x ^ rem.shift(); rem.push(0); for (var q = 0; q < rem.length; q++) rem[q] ^= qrMul(div[q], f); });
+      if (bi < nShort) dat.push(0);
+      blocks.push(dat.concat(rem));
+    }
+    var cw = [];
+    for (var ci = 0; ci < blocks[0].length; ci++) for (var bj = 0; bj < blocks.length; bj++) if (ci !== shortLen - eccLen || bj >= nShort) cw.push(blocks[bj][ci]);
+    // modules
+    var size = ver * 4 + 17, m = [], fn = [];
+    for (var y = 0; y < size; y++) { m.push([]); fn.push([]); for (var x = 0; x < size; x++) { m[y].push(false); fn[y].push(false); } }
+    var setF = function (x, y, d) { m[y][x] = d; fn[y][x] = true; };
+    for (var t = 0; t < size; t++) { setF(6, t, t % 2 === 0); setF(t, 6, t % 2 === 0); }
+    [[3, 3], [size - 4, 3], [3, size - 4]].forEach(function (c) {
+      for (var dy = -4; dy <= 4; dy++) for (var dx = -4; dx <= 4; dx++) {
+        var dist = Math.max(Math.abs(dx), Math.abs(dy)), xx = c[0] + dx, yy = c[1] + dy;
+        if (xx >= 0 && xx < size && yy >= 0 && yy < size) setF(xx, yy, dist !== 2 && dist !== 4);
+      }
+    });
+    var ap = qrAlignPos(ver), na = ap.length;
+    for (var ai = 0; ai < na; ai++) for (var aj = 0; aj < na; aj++) {
+      if ((ai === 0 && aj === 0) || (ai === 0 && aj === na - 1) || (ai === na - 1 && aj === 0)) continue;
+      for (var ey = -2; ey <= 2; ey++) for (var ex = -2; ex <= 2; ex++) setF(ap[ai] + ex, ap[aj] + ey, Math.max(Math.abs(ex), Math.abs(ey)) !== 1);
+    }
+    var drawFormat = function (mask) {
+      var d = QR_ECC[ecl][0] << 3 | mask, rm = d;
+      for (var i = 0; i < 10; i++) rm = (rm << 1) ^ ((rm >>> 9) * 0x537);
+      var fb = (d << 10 | rm) ^ 0x5412, bit = function (i) { return ((fb >>> i) & 1) !== 0; };
+      for (i = 0; i <= 5; i++) setF(8, i, bit(i));
+      setF(8, 7, bit(6)); setF(8, 8, bit(7)); setF(7, 8, bit(8));
+      for (i = 9; i < 15; i++) setF(14 - i, 8, bit(i));
+      for (i = 0; i < 8; i++) setF(size - 1 - i, 8, bit(i));
+      for (i = 8; i < 15; i++) setF(8, size - 15 + i, bit(i));
+      setF(8, size - 8, true);
+    };
+    drawFormat(0);
+    if (ver >= 7) {
+      var vr = ver; for (var vi = 0; vi < 12; vi++) vr = (vr << 1) ^ ((vr >>> 11) * 0x1F25);
+      var vb = ver << 12 | vr;
+      for (vi = 0; vi < 18; vi++) { var vd = ((vb >>> vi) & 1) !== 0, va = size - 11 + vi % 3, vbb = Math.floor(vi / 3); setF(va, vbb, vd); setF(vbb, va, vd); }
+    }
+    for (var idx = 0, right = size - 1; right >= 1; right -= 2) {
+      if (right === 6) right = 5;
+      for (var vert = 0; vert < size; vert++) for (var jj = 0; jj < 2; jj++) {
+        var cx = right - jj, cy = ((right + 1) & 2) === 0 ? size - 1 - vert : vert;
+        if (!fn[cy][cx] && idx < cw.length * 8) { m[cy][cx] = ((cw[idx >>> 3] >>> (7 - (idx & 7))) & 1) !== 0; idx++; }
+      }
+    }
+    var maskFn = [function (x, y) { return (x + y) % 2 === 0; }, function (x, y) { return y % 2 === 0; }, function (x) { return x % 3 === 0; },
+      function (x, y) { return (x + y) % 3 === 0; }, function (x, y) { return (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0; },
+      function (x, y) { return x * y % 2 + x * y % 3 === 0; }, function (x, y) { return (x * y % 2 + x * y % 3) % 2 === 0; },
+      function (x, y) { return ((x + y) % 2 + x * y % 3) % 2 === 0; }];
+    var applyMask = function (k) { for (var y = 0; y < size; y++) for (var x = 0; x < size; x++) if (!fn[y][x] && maskFn[k](x, y)) m[y][x] = !m[y][x]; };
+    var penalty = function () {
+      var p = 0, dark = 0, line = function (get) {
+        for (var a = 0; a < size; a++) {
+          var run = 1, s = '';
+          for (var b = 0; b < size; b++) {
+            var v = get(a, b); s += v ? '1' : '0';
+            if (b > 0) { if (v === get(a, b - 1)) { run++; if (run === 5) p += 3; else if (run > 5) p++; } else run = 1; }
+          }
+          s = '0000' + s + '0000';
+          for (var f = s.indexOf('1011101'); f >= 0; f = s.indexOf('1011101', f + 1)) if (s.substr(f - 4, 4) === '0000' || s.substr(f + 7, 4) === '0000') p += 40;
+        }
+      };
+      line(function (a, b) { return m[a][b]; }); line(function (a, b) { return m[b][a]; });
+      for (var y = 0; y < size; y++) for (var x = 0; x < size; x++) {
+        if (m[y][x]) dark++;
+        if (x < size - 1 && y < size - 1 && m[y][x] === m[y][x + 1] && m[y][x] === m[y + 1][x] && m[y][x] === m[y + 1][x + 1]) p += 3;
+      }
+      return p + (Math.ceil(Math.abs(dark * 20 - size * size * 10) / (size * size)) - 1) * 10;
+    };
+    var best = 0, bestP = Infinity;
+    for (var mk = 0; mk < 8; mk++) { applyMask(mk); drawFormat(mk); var pp = penalty(); if (pp < bestP) { bestP = pp; best = mk; } applyMask(mk); }
+    applyMask(best); drawFormat(best);
+    return { size: size, version: ver, ecl: ecl, dark: m };
+  }
+  function qrSvg(text, ecl, color, quiet) {
+    var q = qrMatrix(text, ecl);
+    if (!q) return '<svg viewBox="0 0 100 40" width="100%" height="100%"><text x="50" y="24" font-size="9" text-anchor="middle" fill="#c0392b" font-family="sans-serif">QR: text too long</text></svg>';
+    var z = quiet === false ? 0 : 4, n = q.size + z * 2, d = '';
+    for (var y = 0; y < q.size; y++) {
+      for (var x = 0; x < q.size; x++) {
+        if (!q.dark[y][x]) continue;
+        var x0 = x; while (x + 1 < q.size && q.dark[y][x + 1]) x++;
+        d += 'M' + (x0 + z) + ' ' + (y + z) + 'h' + (x - x0 + 1) + 'v1h-' + (x - x0 + 1) + 'z';
+      }
+    }
+    return '<svg viewBox="0 0 ' + n + ' ' + n + '" preserveAspectRatio="xMidYMid meet" width="100%" height="100%" shape-rendering="crispEdges"><path fill="' + (color || '#000') + '" d="' + d + '"/></svg>';
+  }
+  function qrItemSvg(it) { var e = it.el || {}; return it.value ? qrSvg(it.value, e.ecc, (e.style || {}).color, e.quiet) : ''; }
+
   /* -------------------------------------------------------- element HTML */
   function boxStyle(x, y, w, h) { return 'left:' + r2(x) + 'pt;top:' + r2(y) + 'pt;width:' + r2(w) + 'pt;height:' + r2(h) + 'pt;'; }
 
@@ -698,9 +851,9 @@
         var fit = e.fit === 'cover' ? 'cover' : e.fit === 'stretch' ? 'fill' : 'contain';
         return '<div class="rpt-el" style="' + pos + borderCss(s) + '"><img src="' + esc(it.src) + '" style="width:100%;height:100%;object-fit:' + fit + ';display:block" alt=""></div>';
       }
-      case 'barcode': {
-        var showText = e.showText !== false, th = showText ? Math.min(it.h * 0.3, num(s.fontSize, 8) * 1.4) : 0;
-        var bars = it.value ? code128Svg(it.value, s.color) : '';
+      case 'barcode': case 'qr': {
+        var showText = it.kind === 'qr' ? e.showText === true : e.showText !== false, th = showText ? Math.min(it.h * 0.3, num(s.fontSize, 8) * 1.4) : 0;
+        var bars = it.kind === 'qr' ? qrItemSvg(it) : it.value ? code128Svg(it.value, s.color) : '';
         return '<div class="rpt-el" style="' + pos + (s.bg ? 'background:' + s.bg + ';' : '') + '"><div style="height:' + r2(it.h - th) + 'pt">' + bars + '</div>' +
           (showText ? '<div style="height:' + r2(th) + 'pt;font-family:' + fontStack(s.fontFamily) + ';font-size:' + num(s.fontSize, 8) + 'pt;text-align:center;line-height:' + r2(th) + 'pt;color:' + (s.color || '#000') + '">' + esc(it.value) + '</div>' : '') + '</div>';
       }
@@ -733,7 +886,7 @@
         it.src = (ctx.assets[src] || ctx.assets[String(src).toUpperCase()]) || (/^(data:|https?:|\/)/.test(src) ? src : '');
         break;
       }
-      case 'barcode': it.value = interpolate(e.value, ctx); break;
+      case 'barcode': case 'qr': it.value = interpolate(e.value, ctx); break;
     }
     return it;
   }
@@ -1128,6 +1281,7 @@
     if (it.kind === 'line') o.dir = e.dir || 'h';
     if (it.kind === 'image') { o.src = it.src || ''; o.fit = e.fit || 'contain'; }
     if (it.kind === 'barcode') { o.value = it.value; o.showText = e.showText !== false; o.svg = it.value ? code128Svg(it.value, (e.style || {}).color) : ''; }
+    if (it.kind === 'qr') { o.value = it.value; o.showText = e.showText === true; o.svg = qrItemSvg(it); }
     if (it.rowKind) { o.rowKind = it.rowKind; o.tid = e.id; }
     if (it.kind === 'ellipse' || (it.kind === 'line' && (e.dir === 'd1' || e.dir === 'd2' || ((e.style || {}).dash && (e.style || {}).dash !== 'solid'))) || (it.kind === 'rect' && num((e.style || {}).radius) > 0)) o.raster = true;
     return o;
@@ -1191,6 +1345,7 @@
         break;
       }
       case 'barcode': fake.value = /\{\{/.test(e.value || '') ? '12345678' : (e.value || '12345678'); break;
+      case 'qr': fake.value = /\{\{/.test(e.value || '') ? 'https://example.com/' + String(e.value).replace(/[{}\s]/g, '') : (e.value || 'https://example.com'); break;
       case 'table': {
         var cols = e.columns || [], tw = cols.reduce(function (sum, c) { return sum + num(c.width, 60); }, 0) || 1, sc = w / tw;
         var hs = e.headerStyle || {}, rs = e.rowStyle || {}, out = '', x = 0;
@@ -1236,6 +1391,6 @@
     render: render, renderAsync: renderAsync, preloadFonts: preloadFonts, fontsUsed: fontsUsed, baseCss: baseCss,
     designHtml: designHtml, tableDesignHeight: tableDesignHeight, textCss: textCss,
     parse: parse, evaluate: evaluate, interpolate: interpolate, formatValue: formatValue, amountInWords: amountInWords,
-    code128Codes: code128Codes, code128Svg: code128Svg, C128: C128
+    code128Codes: code128Codes, code128Svg: code128Svg, C128: C128, qrMatrix: qrMatrix, qrSvg: qrSvg
   };
 });

@@ -18,7 +18,7 @@
     '<circle cx="88" cy="80" r="9" fill="#f5b942"/></svg>';
 
   var invoice = {
-    report: { code: 'INVOICE', name: 'Sales Invoice', description: 'Sample invoice: bands, groups, sub-totals, amount in words, Tamil/Sinhala text, barcode', status: 'PUBLISHED' },
+    report: { code: 'INVOICE', name: 'Sales Invoice', description: 'Sample invoice: bands, groups, sub-totals, amount in words, Tamil/Sinhala text, barcode, QR code', status: 'PUBLISHED' },
     sources: [
       { name: 'HEADER', params: { INVOICE_NO: 'INV-2026-0042' }, sql:
         "select nvl(:INVOICE_NO, 'INV-2026-0042')        as inv_no,\n" +
@@ -96,7 +96,7 @@
           t(306, 6, 136, 14, 'Subtotal · {{CATEGORY}}', { fontSize: 8, color: muted, align: 'right' }),
           t(442, 6, 96.58, 14, '{{SUM(AMOUNT)|#,##0.00}}', { align: 'right', bold: true })
         ] },
-        { type: 'summary', height: 150, elements: [
+        { type: 'summary', height: 190, elements: [
           { type: 'rect', x: 318, y: 8, w: 220.58, h: 72, style: { bg: soft, radius: 4 } },
           t(328, 14, 100, 14, 'Subtotal', { color: muted }),
           t(428, 14, 100, 14, '{{SUM(AMOUNT)|#,##0.00}}', { align: 'right' }),
@@ -109,7 +109,10 @@
           t(0, 23, 300, 28, '{{WORDS(ROUND(SUM(AMOUNT)*1.18,2),\'Rupees\',\'Cents\')}} Only', { italic: true }, { canGrow: true }),
           t(0, 92, 320, 16, 'நன்றி! மீண்டும் வருக  ·  ස්තුතියි, නැවත එන්න  ·  Thank you!', { fontSize: 10, color: navy }),
           line(358.58, 118, 180, { lineWidth: 0.75, color: '#555555', dash: 'dashed' }),
-          t(358.58, 124, 180, 12, 'Authorised signature', { fontSize: 7.5, color: muted, align: 'center' })
+          t(358.58, 124, 180, 12, 'Authorised signature', { fontSize: 7.5, color: muted, align: 'center' }),
+          { type: 'qr', x: 0, y: 116, w: 66, h: 66, value: 'https://pay.example.lk/invoice/{{INV_NO}}?amount={{ROUND(SUM(AMOUNT)*1.18,2)}}', ecc: 'M', quiet: true, style: { color: navy } },
+          t(72, 132, 220, 12, 'SCAN TO PAY OR VERIFY', { fontSize: 7, bold: true, color: muted }),
+          t(72, 145, 220, 24, 'pay.example.lk/invoice/{{INV_NO}}', { fontSize: 8, color: navy })
         ] },
         { type: 'pageFooter', height: 22, elements: [
           line(0, 0, CW, { lineWidth: 0.5, color: rule }),

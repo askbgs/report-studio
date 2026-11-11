@@ -280,7 +280,7 @@ async function buildDocx(doc, opts) {
     // keep the paint order of the report: earlier items are drawn first (behind later ones)
     pg.items.forEach((it) => {
       if (it.kind === 'cell') { cells.push(it); return; }
-      if (it.png || it.kind === 'image' || it.kind === 'barcode') { const im = floatingImage(it); if (im) runs.push(im); return; }
+      if (it.png || it.kind === 'image' || it.kind === 'barcode' || it.kind === 'qr') { const im = floatingImage(it); if (im) runs.push(im); return; }
       if (it.kind === 'text') runs.push(...textBox(shapes, it));
       else if (it.kind === 'rect' || it.kind === 'line') runs.push(...shapeBox(shapes, it));
     });

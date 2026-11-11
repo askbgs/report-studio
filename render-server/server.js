@@ -110,7 +110,7 @@ const RASTERIZE = async (doc) => {
           if (!/^data:image\/(png|jpe?g|gif)/i.test(it.src)) {
             const c = canvasFor(it.nw / SCALE, it.nh / SCALE); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); it.png = c.toDataURL('image/png');
           }
-        } else if (it.kind === 'barcode' && it.svg) {
+        } else if ((it.kind === 'barcode' || it.kind === 'qr') && it.svg) {
           const showText = it.showText, th = showText ? Math.min(it.h * 0.3, (Number(it.st.fontSize) || 8) * 1.4) : 0;
           const c = canvasFor(it.w, it.h), g = c.getContext('2d');
           if (it.st.bg) { g.fillStyle = it.st.bg; g.fillRect(0, 0, c.width, c.height); }
